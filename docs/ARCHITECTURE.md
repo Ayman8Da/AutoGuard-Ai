@@ -220,7 +220,7 @@ process-local and resets on restart; this limitation is documented rather than h
 3. **Multi-agent workflow (done):** LangGraph graph, deterministic risk engine, mock/Groq/Ollama narrative clients, report persistence and diagnostics API.
 4. **Monitoring & incidents (done):** passive Monitoring Agent, aggregated statistics, three incident triggers and three runbooks, `/monitoring` and `/incidents` APIs.
 5. **Agent cards & governance (done):** one card per agent plus change-control, prompt, data and incident policy.
-6. Unit/integration/API/failure tests, ≥80% coverage.
+6. **Test suite (done):** unit, API, integration and dedicated failure suites; 264 tests and 97% branch coverage.
 7. GitHub Actions CI (lint, tests, coverage, image build).
 8. Dockerfile, compose, local container validation.
 9. Render deployment (verified, not assumed).

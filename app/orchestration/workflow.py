@@ -68,7 +68,7 @@ class DiagnosticWorkflow:
         """Execute the graph and return the completed, traceable report."""
         run_id = workflow_id or generate_id("WF")
         if self._monitoring is not None:
-            self._monitoring.record_workflow_started()
+            self._notify(self._monitoring.record_workflow_started)
         runner = AgentRunner(
             max_retries=self._max_retries,
             observer=self._monitoring.record_execution if self._monitoring else None,
@@ -95,8 +95,10 @@ class DiagnosticWorkflow:
             )
         except Exception as exc:
             if self._monitoring is not None:
-                self._monitoring.record_workflow_failed(
-                    type(exc).__name__, self._elapsed_ms(perf_started)
+                self._notify(
+                    self._monitoring.record_workflow_failed,
+                    type(exc).__name__,
+                    self._elapsed_ms(perf_started),
                 )
             raise
         report = state["report"]
@@ -121,9 +123,11 @@ class DiagnosticWorkflow:
         )
 
         if self._monitoring is not None:
-            self._monitoring.record_execution(orchestrator_execution)
-            self._monitoring.record_workflow_completed(
-                report, self._elapsed_ms(perf_started)
+            self._notify(self._monitoring.record_execution, orchestrator_execution)
+            self._notify(
+                self._monitoring.record_workflow_completed,
+                report,
+                self._elapsed_ms(perf_started),
             )
 
         logger.info(
@@ -143,6 +147,15 @@ class DiagnosticWorkflow:
     @staticmethod
     def _elapsed_ms(perf_started: float) -> float:
         return round((time.perf_counter() - perf_started) * 1000, 3)
+
+    def _notify(self, callback, *args: object) -> None:  # noqa: ANN001 - internal hook
+        """Call a monitoring hook without ever failing the diagnosis."""
+        if self._monitoring is None:
+            return
+        try:
+            callback(*args)
+        except Exception:  # monitoring must never break the workflow
+            logger.exception("monitoring_hook_failed")
 
     def _build_graph(self, runner: AgentRunner):  # noqa: ANN202 - builder returns compiled graph
         """Compile a fresh graph bound to this invocation's execution ledger."""

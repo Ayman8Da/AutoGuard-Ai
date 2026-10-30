@@ -22,13 +22,13 @@ operational incidents with runbooks — all linked by one correlation ID.
 | 3 | Multi-agent architecture (LangGraph) + LLM provider abstraction | **Complete — verified** |
 | 4 | Monitoring, incidents, runbooks | **Complete — verified** |
 | 5 | Agent Cards & governance documentation | **Complete** |
-| 6 | Full automated test suite (≥80% core coverage) | Pending |
+| 6 | Full automated test suite (≥80% core coverage) | **Complete — 264 tests, 97%** |
 | 7 | GitHub Actions CI | Pending |
 | 8 | Docker & local container validation | Pending |
 | 9 | Render deployment | Pending |
 | 10 | Documentation & final demonstration | Pending |
 
-Phase 1–4 verification (actual, local): **258 tests passing, 97% branch coverage
+Phase 1–6 verification (actual, local): **264 tests passing, 97% branch coverage
 (app + simulator), `ruff` clean**.
 
 ---
@@ -283,6 +283,7 @@ AutoGuard-AI/
 │   └── vehicle_simulator.py    # Seeded jitter + CLI
 ├── tests/
 │   ├── api/
+│   ├── failure/
 │   ├── integration/
 │   └── unit/
 ├── agent_cards/                # One card per agent (purpose, I/O, safety, ownership)
