@@ -1,1 +1,1 @@
-"""Incident lifecycle: detection, runbook selection, retry and escalation."""
+"""Incident management and operational runbooks."""

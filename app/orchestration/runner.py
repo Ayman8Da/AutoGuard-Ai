@@ -25,6 +25,9 @@ logger = get_logger("orchestration.runner")
 
 T = TypeVar("T")
 
+#: Optional sink for every recorded attempt (used by the Monitoring Agent).
+ExecutionObserver = Callable[["AgentExecution"], None]
+
 #: Maximum number of characters of an upstream error kept in the execution
 #: ledger. Full tracebacks stay in the logs.
 _MAX_ERROR_MESSAGE = 500
@@ -33,10 +36,15 @@ _MAX_ERROR_MESSAGE = 500
 class AgentRunner:
     """Runs one agent operation with retries and records every attempt."""
 
-    def __init__(self, max_retries: int = 1) -> None:
+    def __init__(
+        self,
+        max_retries: int = 1,
+        observer: ExecutionObserver | None = None,
+    ) -> None:
         if max_retries < 0:
             raise ValueError("max_retries must be >= 0")
         self._max_retries = max_retries
+        self._observer = observer
         self._executions: list[AgentExecution] = []
 
     @property
@@ -145,4 +153,12 @@ class AgentRunner:
             error_message=error_message,
         )
         self._executions.append(execution)
+        if self._observer is not None:
+            try:
+                self._observer(execution)
+            except Exception:  # monitoring must never break the workflow
+                logger.exception(
+                    "agent_execution_observer_failed",
+                    extra={"agent": agent_name, "workflow_id": workflow_id},
+                )
         return execution

@@ -20,6 +20,8 @@ from app.core.config import Settings, get_settings
 from app.core.correlation import CORRELATION_HEADER
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import CorrelationIdMiddleware
+from app.incidents.manager import IncidentManager
+from app.monitoring.agent import MonitoringAgent
 from app.orchestration.workflow import DiagnosticWorkflow
 from app.services.diagnostics_repository import InMemoryDiagnosticRepository
 from app.services.diagnostics_service import DiagnosticsService
@@ -83,6 +85,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     narrative_client = build_narrative_client(settings)
+    application.state.monitoring_agent = MonitoringAgent(
+        max_executions=settings.monitoring_buffer_size
+    )
+    application.state.incident_manager = IncidentManager(
+        max_entries=settings.incident_buffer_size
+    )
     application.state.diagnostic_workflow = DiagnosticWorkflow(
         diagnostic_agent=DiagnosticAgent(
             narrative_client, max_llm_retries=settings.agent_max_retries
@@ -91,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         maintenance_agent=MaintenanceAgent(),
         reporting_agent=ReportingAgent(),
         max_retries=settings.agent_max_retries,
+        monitoring=application.state.monitoring_agent,
     )
     application.state.diagnostics_repository = InMemoryDiagnosticRepository(
         max_entries=settings.diagnostics_buffer_size
@@ -98,6 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.diagnostics_service = DiagnosticsService(
         application.state.diagnostics_repository,
         application.state.diagnostic_workflow,
+        incidents=application.state.incident_manager,
     )
 
     if settings.cors_origin_list:

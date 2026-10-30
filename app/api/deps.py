@@ -6,6 +6,8 @@ from typing import Annotated, cast
 
 from fastapi import Depends, Request
 
+from app.incidents.manager import IncidentManager
+from app.monitoring.agent import MonitoringAgent
 from app.orchestration.workflow import DiagnosticWorkflow
 from app.services.diagnostics_service import DiagnosticsService
 from app.services.telemetry_service import TelemetryService
@@ -26,6 +28,18 @@ def get_diagnostic_workflow(request: Request) -> DiagnosticWorkflow:
     return cast(DiagnosticWorkflow, request.app.state.diagnostic_workflow)
 
 
+def get_monitoring_agent(request: Request) -> MonitoringAgent:
+    """Return the application-scoped Monitoring Agent."""
+    return cast(MonitoringAgent, request.app.state.monitoring_agent)
+
+
+def get_incident_manager(request: Request) -> IncidentManager:
+    """Return the application-scoped incident manager."""
+    return cast(IncidentManager, request.app.state.incident_manager)
+
+
 TelemetryServiceDep = Annotated[TelemetryService, Depends(get_telemetry_service)]
 DiagnosticsServiceDep = Annotated[DiagnosticsService, Depends(get_diagnostics_service)]
 DiagnosticWorkflowDep = Annotated[DiagnosticWorkflow, Depends(get_diagnostic_workflow)]
+MonitoringAgentDep = Annotated[MonitoringAgent, Depends(get_monitoring_agent)]
+IncidentManagerDep = Annotated[IncidentManager, Depends(get_incident_manager)]

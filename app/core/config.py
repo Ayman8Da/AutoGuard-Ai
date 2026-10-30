@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     # Persistence (in-memory for now)
     telemetry_buffer_size: int = Field(default=1000, ge=1, le=100_000)
     diagnostics_buffer_size: int = Field(default=500, ge=1, le=100_000)
+    incident_buffer_size: int = Field(default=500, ge=1, le=100_000)
+    monitoring_buffer_size: int = Field(default=5000, ge=1, le=100_000)
 
     # Logging
     log_level: str = "INFO"

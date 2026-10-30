@@ -29,6 +29,7 @@ from app.models.diagnostics import (
     ReportWarning,
 )
 from app.models.telemetry import TelemetryRecord
+from app.monitoring.agent import MonitoringAgent
 from app.orchestration.runner import AgentRunner
 from app.orchestration.state import WorkflowState
 from app.utils.ids import generate_id
@@ -50,12 +51,14 @@ class DiagnosticWorkflow:
         maintenance_agent: MaintenanceAgent,
         reporting_agent: ReportingAgent,
         max_retries: int = 1,
+        monitoring: MonitoringAgent | None = None,
     ) -> None:
         self._diagnostic_agent = diagnostic_agent
         self._risk_agent = risk_agent
         self._maintenance_agent = maintenance_agent
         self._reporting_agent = reporting_agent
         self._max_retries = max_retries
+        self._monitoring = monitoring
 
     async def run(
         self,
@@ -64,7 +67,12 @@ class DiagnosticWorkflow:
     ) -> DiagnosticReport:
         """Execute the graph and return the completed, traceable report."""
         run_id = workflow_id or generate_id("WF")
-        runner = AgentRunner(max_retries=self._max_retries)
+        if self._monitoring is not None:
+            self._monitoring.record_workflow_started()
+        runner = AgentRunner(
+            max_retries=self._max_retries,
+            observer=self._monitoring.record_execution if self._monitoring else None,
+        )
         started_at = utc_now()
         perf_started = time.perf_counter()
 
@@ -78,12 +86,19 @@ class DiagnosticWorkflow:
         )
 
         graph = self._build_graph(runner)
-        state: WorkflowState = await graph.ainvoke(
-            {
-                "telemetry_record": telemetry_record,
-                "workflow_id": run_id,
-            }
-        )
+        try:
+            state: WorkflowState = await graph.ainvoke(
+                {
+                    "telemetry_record": telemetry_record,
+                    "workflow_id": run_id,
+                }
+            )
+        except Exception as exc:
+            if self._monitoring is not None:
+                self._monitoring.record_workflow_failed(
+                    type(exc).__name__, self._elapsed_ms(perf_started)
+                )
+            raise
         report = state["report"]
 
         # The Orchestrator and Reporting Agent executions are recorded *after*
@@ -97,13 +112,19 @@ class DiagnosticWorkflow:
             attempt=1,
             started_at=started_at,
             ended_at=finished_at,
-            execution_time_ms=round((time.perf_counter() - perf_started) * 1000, 3),
+            execution_time_ms=self._elapsed_ms(perf_started),
         )
         report = report.model_copy(
             update={
                 "agent_executions": [orchestrator_execution, *runner.executions]
             }
         )
+
+        if self._monitoring is not None:
+            self._monitoring.record_execution(orchestrator_execution)
+            self._monitoring.record_workflow_completed(
+                report, self._elapsed_ms(perf_started)
+            )
 
         logger.info(
             "workflow_completed",
@@ -118,6 +139,10 @@ class DiagnosticWorkflow:
             },
         )
         return report
+
+    @staticmethod
+    def _elapsed_ms(perf_started: float) -> float:
+        return round((time.perf_counter() - perf_started) * 1000, 3)
 
     def _build_graph(self, runner: AgentRunner):  # noqa: ANN202 - builder returns compiled graph
         """Compile a fresh graph bound to this invocation's execution ledger."""

@@ -4,7 +4,8 @@
 
 AutoGuard AI ingests simulated vehicle telemetry, detects abnormal conditions, runs a
 supervised multi-agent diagnostic workflow, classifies risk with deterministic rules,
-recommends maintenance actions and produces traceable diagnostic reports.
+recommends maintenance actions, produces traceable diagnostic reports and raises
+operational incidents with runbooks — all linked by one correlation ID.
 
 > **Data disclaimer:** all telemetry is synthetic. AutoGuard AI is an engineering
 > demonstration of agentic AI, observability and CI/CD — it is **not** a validated
@@ -19,7 +20,7 @@ recommends maintenance actions and produces traceable diagnostic reports.
 | 1 | Foundation: config, structured logging, correlation IDs, error contract, health API | **Complete — verified** |
 | 2 | Vehicle simulator, telemetry validation, in-memory repository, fleet/telemetry API | **Complete — verified** |
 | 3 | Multi-agent architecture (LangGraph) + LLM provider abstraction | **Complete — verified** |
-| 4 | Monitoring, incidents, runbooks | Pending |
+| 4 | Monitoring, incidents, runbooks | **Complete — verified** |
 | 5 | Agent Cards & governance documentation | Pending |
 | 6 | Full automated test suite (≥80% core coverage) | Pending |
 | 7 | GitHub Actions CI | Pending |
@@ -27,7 +28,7 @@ recommends maintenance actions and produces traceable diagnostic reports.
 | 9 | Render deployment | Pending |
 | 10 | Documentation & final demonstration | Pending |
 
-Phase 1–3 verification (actual, local): **226 tests passing, 97% branch coverage
+Phase 1–4 verification (actual, local): **258 tests passing, 97% branch coverage
 (app + simulator), `ruff` clean**.
 
 ---
@@ -104,15 +105,44 @@ Values are plausible for a demo but are **not** validated automotive measurement
 | `GET` | `/api/v1/vehicles/{vehicle_id}` | One vehicle + its latest telemetry record |
 | `GET` | `/api/v1/diagnostics` | Recent diagnostic report summaries, newest first (`?limit=1..200`) |
 | `GET` | `/api/v1/diagnostics/{diagnostic_id}` | Full report: findings, risk, maintenance plan, agent ledger |
+| `GET` | `/api/v1/monitoring` | Workflow/agent counters, per-agent statistics, incident totals |
+| `GET` | `/api/v1/incidents` | Operational incidents (`?limit`, `?status`, `?severity`, `?vehicle_id`) |
 | `GET` | `/docs` | Swagger UI |
 | `GET` | `/openapi.json` | OpenAPI 3 schema |
 
-### Planned (subsequent phases)
+### Monitoring and incidents
 
-| Method | Path | Phase |
-| ------ | ---- | ----- |
-| `GET` | `/api/v1/monitoring` | 4 |
-| `GET` | `/api/v1/incidents` | 4 |
+`GET /api/v1/monitoring` aggregates every recorded agent attempt and workflow outcome for
+the current process:
+
+```json
+{
+  "llm_provider": "mock",
+  "workflows_started": 4,
+  "workflows_completed": 2,
+  "workflows_degraded": 1,
+  "workflows_failed": 1,
+  "workflow_success_rate_percent": 75.0,
+  "agent_executions_total": 19,
+  "agent_failures_total": 2,
+  "agents": [{ "agent_name": "DiagnosticAgent", "executions": 4, "successes": 3 }],
+  "diagnostics_stored": 3,
+  "incidents_total": 3,
+  "incidents_active": 3
+}
+```
+
+`GET /api/v1/incidents` returns the incidents implied by workflow outcomes, newest first:
+
+| Incident code | Trigger | Severity | Runbook |
+| ------------- | ------- | -------- | ------- |
+| `CRITICAL_VEHICLE_RISK` | Deterministic risk level `critical` | critical | `high_risk_vehicle` |
+| `LLM_PROVIDER_FAILURE` | `LLM_NARRATIVE_UNAVAILABLE` warning (degraded report) | medium | `llm_provider_failure` |
+| `AGENT_EXECUTION_FAILED` | Agent exhausted its retry budget | high | `agent_failure` |
+
+Each incident carries the correlation ID, vehicle, diagnostic/workflow IDs, the owner
+and the ordered runbook steps. Invalid telemetry stays a `422` boundary error: it never
+reaches the workflow and never creates an incident.
 
 A single ingestion call returns the complete diagnosis:
 
@@ -168,6 +198,8 @@ All variables use the `AUTOGUARD_` prefix and can be set in `.env`.
 | `AUTOGUARD_CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins |
 | `AUTOGUARD_TELEMETRY_BUFFER_SIZE` | `1000` | Telemetry records kept in memory per process |
 | `AUTOGUARD_DIAGNOSTICS_BUFFER_SIZE` | `500` | Diagnostic reports kept in memory per process |
+| `AUTOGUARD_INCIDENT_BUFFER_SIZE` | `500` | Incidents kept in memory per process |
+| `AUTOGUARD_MONITORING_BUFFER_SIZE` | `5000` | Agent execution observations kept in memory |
 | `AUTOGUARD_LLM_PROVIDER` | `mock` | `mock`, `groq` or `ollama` |
 | `AUTOGUARD_LLM_MODEL` | `llama-3.3-70b-versatile` | Model name for the active provider |
 | `AUTOGUARD_GROQ_API_KEY` | *(empty)* | Required only for `groq`; stored as `SecretStr` |
@@ -177,9 +209,9 @@ All variables use the `AUTOGUARD_` prefix and can be set in `.env`.
 Startup fails fast if `AUTOGUARD_LLM_PROVIDER=groq` is set without an API key. Secrets are
 never logged or returned by the API.
 
-**Storage:** telemetry and diagnostic reports live in bounded in-process repositories.
-Restarting the service clears them. The `TelemetryRepository` and `DiagnosticRepository`
-interfaces allow a MongoDB Atlas implementation later without touching the API or agents.
+**Storage:** telemetry, diagnostic reports, incidents and monitoring observations live in
+bounded in-process stores. Restarting the service clears them. The repository contracts
+allow a MongoDB Atlas implementation later without touching the API or agents.
 
 ---
 
@@ -206,7 +238,9 @@ AutoGuard-AI/
 │   │       ├── router.py
 │   │       └── endpoints/
 │   │           ├── vehicles.py         # Telemetry ingestion + fleet routes
-│   │           └── diagnostics.py      # Report list/detail routes
+│   │           ├── diagnostics.py      # Report list/detail routes
+│   │           ├── monitoring.py       # Aggregated monitoring snapshot
+│   │           └── incidents.py        # Incident list/filter route
 │   ├── core/
 │   │   ├── config.py           # Pydantic settings (typed, validated)
 │   │   ├── correlation.py      # Correlation ID generation/sanitisation
@@ -236,8 +270,13 @@ AutoGuard-AI/
 │   │   ├── fleet.py            # 5 simulated vehicles
 │   │   ├── repositories.py     # TelemetryRepository + in-memory store
 │   │   └── telemetry_service.py
-│   ├── monitoring/             # Phase 4
-│   ├── incidents/              # Phase 4
+│   ├── monitoring/
+│   │   ├── agent.py            # Monitoring Agent: execution ledger + statistics
+│   │   └── metrics.py          # MonitoringSnapshot / AgentStatistics contracts
+│   ├── incidents/
+│   │   ├── manager.py          # Incident creation, filtering, bounded store
+│   │   ├── models.py           # Incident + Runbook contracts
+│   │   └── runbooks.py         # Three operational runbooks
 │   └── utils/
 ├── simulator/
 │   ├── scenarios.py            # Four deterministic scenarios
@@ -259,7 +298,7 @@ Planned additions: `agent_cards/`, `runbooks/`, `tests/failure/`,
 
 ---
 
-## Engineering decisions (Phases 1–3)
+## Engineering decisions (Phases 1–4)
 
 - **Modular monolith, not microservices.** One FastAPI process keeps the multi-agent
   workflow debuggable while preserving clean package boundaries.
@@ -270,7 +309,7 @@ Planned additions: `agent_cards/`, `runbooks/`, `tests/failure/`,
 - **One error envelope.** Validation errors, 404s, domain errors and unexpected
   exceptions all return the same shape plus the correlation ID.
 - **Structured JSON logs by default.** Log line fields (`correlation_id`, `agent`,
-  `duration_ms`, `status`) map directly to the Phase 4 monitoring model.
+  `duration_ms`, `status`) map directly to the monitoring model.
 - **LLM provider is pluggable and `mock`-first.** The full stack is testable without an
   API key; Groq is opt-in via environment configuration.
 - **Configuration is validated at startup.** Invalid log levels, API prefixes or a
@@ -293,5 +332,13 @@ Planned additions: `agent_cards/`, `runbooks/`, `tests/failure/`,
   silently reported as success.
 - **The Orchestrator is observed, not magical.** The workflow records its own execution
   alongside the four diagnostic agents, making end-to-end timing visible in the report.
+- **Monitoring is passive and cannot fail a diagnosis.** The Monitoring Agent is fed every
+  `AgentExecution` through an observer; observer exceptions are logged and swallowed.
+  Telemetry is stored before the workflow so a failure still leaves an audit trail.
+- **Incidents are derived, not invented.** Only three deterministic outcomes create
+  incidents (critical risk, degraded narration, exhausted agent retries). Each one is
+  linked to a runbook and to the correlation/workflow/diagnostic IDs.
+- **Invalid telemetry is a boundary error, not an incident.** A `422` never enters the
+  workflow, so operators are not paged for malformed client input.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full target architecture.

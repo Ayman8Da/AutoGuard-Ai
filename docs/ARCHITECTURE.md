@@ -1,7 +1,7 @@
 # AutoGuard AI — Architecture
 
-Status: **Phases 1–3 complete** (foundation, telemetry ingestion and the multi-agent
-workflow). Later phases are marked *planned*.
+Status: **Phases 1–4 complete** (foundation, telemetry ingestion, the multi-agent
+workflow, monitoring and incidents). Later phases are marked *planned*.
 
 ## 1. Goals and non-goals
 
@@ -31,10 +31,10 @@ flowchart LR
     RISK --> MAINT[Maintenance Agent]
     MAINT --> REP[Reporting Agent]
     ORCH -. emits execution events .-> MON[Monitoring Agent]
-    MON -->|on failure| INC[Incident Manager]
+    ORCH -->|completed report| INC[Incident Manager]
+    MON -->|failure counters| INC
     INC --> RB[Runbooks]
     LLM[(Groq / Ollama / Mock)] -. structured JSON .-> DIAG
-    LLM -. structured JSON .-> MAINT
     API --> STORE[(In-memory repository<br/>MongoDB Atlas optional)]
 ```
 
@@ -71,8 +71,8 @@ Validation rules enforced at the API boundary:
 Scenarios (exact fixtures, optional seeded jitter): `normal`, `warning`, `critical`,
 `sensor_failure`. Ingestion is stored in a bounded in-memory repository (default 1000
 records) behind `TelemetryRepository`; records expose `telemetry_id`, `correlation_id`,
-`received_at` and the validated frame. Phase 3 adds the diagnostic report to this
-response.
+`received_at` and the validated frame. Ingestion runs the workflow and returns the
+completed diagnostic report.
 
 ## 3. Layered structure
 
@@ -140,10 +140,17 @@ execution ledger, and records its own `AgentExecution` for end-to-end timing.
    and duration.
 2. The attempt is retried up to `AUTOGUARD_AGENT_MAX_RETRIES` (default 1).
 3. If every attempt fails, an `AgentExecutionError` aborts the workflow with
-   `AGENT_EXECUTION_FAILED`; no report is fabricated.
+   `AGENT_EXECUTION_FAILED`; no report is fabricated. The Diagnostics Service records an
+   `AGENT_EXECUTION_FAILED` incident before re-raising.
 4. LLM narrative failures are *not* agent failures: the Diagnostic Agent falls back to a
-   deterministic summary and the report records `LLM_NARRATIVE_UNAVAILABLE`.
-5. Incident creation, runbook selection and escalation land in Phase 4.
+   deterministic summary and the report records `LLM_NARRATIVE_UNAVAILABLE`; a
+   `LLM_PROVIDER_FAILURE` incident is raised at medium severity.
+5. A deterministic `CRITICAL` risk classification raises a `CRITICAL_VEHICLE_RISK`
+   incident linked to the `high_risk_vehicle` runbook. Invalid telemetry never reaches
+   the workflow, so it is a `422` boundary error and not an incident.
+6. Every incident stores the correlation ID, vehicle, diagnostic/workflow IDs and the
+   ordered runbook steps. Lifecycle changes are out of scope for the demo (all incidents
+   start `open`).
 
 ## 6. State and contracts (implemented)
 
@@ -160,7 +167,7 @@ node independently unit-testable.
 
 ## 7. Observability contract
 
-Current (Phases 1–3):
+Current (Phases 1–4):
 
 - `X-Correlation-ID` accepted/generated per request, returned on every response.
 - JSON logs include `timestamp`, `level`, `logger`, `message`, `correlation_id`,
@@ -168,21 +175,21 @@ Current (Phases 1–3):
 - Error envelope always embeds the correlation ID.
 - Every agent attempt produces an `AgentExecution` (`agent_name`, `workflow_id`,
   `correlation_id`, `status`, `attempt`, timings, error type/message) attached to the report.
-
-Planned (Phase 4):
-
-- One in-memory execution record per agent: `agent`, `correlation_id`, `status`
-  (`STARTED`/`SUCCESS`/`FAILED`/`RETRYING`), `started_at`, `ended_at`,
-  `execution_time_ms`, `error`, `retry_count`.
-- Aggregated endpoint statistics: totals, success rate, average duration, failures per
-  agent, active incidents.
+- The Monitoring Agent receives every attempt through an observer and keeps a bounded
+  ledger. `GET /api/v1/monitoring` exposes workflow counters (started/completed/degraded/
+  failed), success rate, average duration and per-agent totals, failures, retries and
+  average duration.
+- `GET /api/v1/incidents` exposes derived incidents with severity, status, runbook and
+  correlation/workflow/diagnostic links, filterable by `status`, `severity` and
+  `vehicle_id`.
 
 ## 8. Persistence
 
-Phase 2+ uses repository interfaces (`DiagnosticRepository`, `IncidentRepository`,
-`TraceRepository`) with an in-memory implementation. MongoDB Atlas can be enabled later
-without changing agents or routes. In-memory state is intentionally process-local and
-resets on restart; this limitation is documented rather than hidden.
+Phase 2+ uses repository interfaces (`TelemetryRepository`, `DiagnosticRepository`) with
+bounded in-memory implementations. Incident and monitoring state use the same pattern
+(bounded in-process stores behind `IncidentManager` and `MonitoringAgent`). MongoDB Atlas
+can be enabled later without changing agents or routes. In-memory state is intentionally
+process-local and resets on restart; this limitation is documented rather than hidden.
 
 ## 9. Configuration and security
 
@@ -211,7 +218,7 @@ resets on restart; this limitation is documented rather than hidden.
 1. **Foundation (done):** settings, logging, correlation IDs, errors, health, docs.
 2. **Telemetry (done):** simulator, strict validation, repositories, fleet/telemetry API.
 3. **Multi-agent workflow (done):** LangGraph graph, deterministic risk engine, mock/Groq/Ollama narrative clients, report persistence and diagnostics API.
-4. Monitoring, incidents, runbooks.
+4. **Monitoring & incidents (done):** passive Monitoring Agent, aggregated statistics, three incident triggers and three runbooks, `/monitoring` and `/incidents` APIs.
 5. Agent Cards & governance docs.
 6. Unit/integration/API/failure tests, ≥80% coverage.
 7. GitHub Actions CI (lint, tests, coverage, image build).

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from app.core.errors import NotFoundError
+from app.core.errors import AgentExecutionError, NotFoundError
 from app.core.logging import get_logger
+from app.incidents.manager import IncidentManager
 from app.models.diagnostics import DiagnosticReport, DiagnosticSummary
 from app.models.telemetry import TelemetryRecord
 from app.orchestration.workflow import DiagnosticWorkflow
@@ -19,14 +20,26 @@ class DiagnosticsService:
         self,
         repository: DiagnosticRepository,
         workflow: DiagnosticWorkflow,
+        incidents: IncidentManager | None = None,
     ) -> None:
         self._repository = repository
         self._workflow = workflow
+        self._incidents = incidents
 
     async def analyze(self, telemetry_record: TelemetryRecord) -> DiagnosticReport:
         """Run the multi-agent workflow for a stored telemetry frame."""
-        report = await self._workflow.run(telemetry_record)
+        try:
+            report = await self._workflow.run(telemetry_record)
+        except AgentExecutionError as exc:
+            if self._incidents is not None:
+                self._incidents.record_agent_failure(
+                    exc, correlation_id=telemetry_record.correlation_id
+                )
+            raise
+
         self._repository.add(report)
+        if self._incidents is not None:
+            self._incidents.process_report(report)
         return report
 
     def list_reports(self, limit: int = 50) -> list[DiagnosticSummary]:
@@ -55,3 +68,7 @@ class DiagnosticsService:
                 details={"diagnostic_id": diagnostic_id},
             )
         return report
+
+    def count(self) -> int:
+        """Number of stored reports (used by the monitoring endpoint)."""
+        return self._repository.count()
