@@ -1,0 +1,33 @@
+# Render Blueprint for AutoGuard AI.
+# This file is prepared but has NOT been applied: no Render account/credentials were
+# available in the development workspace. See DEPLOYMENT.md.
+services:
+  - type: web
+    name: autoguard-ai
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: AUTOGUARD_ENVIRONMENT
+        value: production
+      - key: AUTOGUARD_LOG_LEVEL
+        value: INFO
+      - key: AUTOGUARD_LOG_FORMAT
+        value: json
+      - key: AUTOGUARD_LLM_PROVIDER
+        value: mock
+      - key: AUTOGUARD_LLM_MODEL
+        value: llama-3.3-70b-versatile
+      - key: AUTOGUARD_LLM_TIMEOUT_SECONDS
+        value: "30"
+      - key: AUTOGUARD_AGENT_MAX_RETRIES
+        value: "1"
+      # Set in the Render dashboard; never commit the value.
+      - key: AUTOGUARD_GROQ_API_KEY
+        sync: false
+      - key: AUTOGUARD_CORS_ORIGINS
+        value: ""

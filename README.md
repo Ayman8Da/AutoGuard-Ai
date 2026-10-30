@@ -25,7 +25,7 @@ operational incidents with runbooks — all linked by one correlation ID.
 | 6 | Full automated test suite (≥80% core coverage) | **Complete — 264 tests, 97%** |
 | 7 | GitHub Actions CI | **Configured — not executed (no GitHub remote)** |
 | 8 | Docker & local container validation | **Prepared — not validated (Docker unavailable here)** |
-| 9 | Render deployment | Pending |
+| 9 | Render deployment | **Prepared — not deployed (no credentials here)** |
 | 10 | Documentation & final demonstration | Pending |
 
 Phase 1–6 verification (actual, local): **264 tests passing, 97% branch coverage
@@ -76,6 +76,16 @@ runtime `PORT` (used by Render). The default provider is `mock`, so no secret is
 > pushed to a GitHub remote.
 
 ---
+
+## Deployment
+
+[`render.yaml`](render.yaml) defines a Render Docker web service with `/health` as the
+health check and `mock` as the default LLM provider. Follow
+[DEPLOYMENT.md](DEPLOYMENT.md) for Blueprint/manual steps and post-deploy verification.
+
+**Status:** the Render Blueprint is prepared but **has not been applied** — no Render
+account or credentials were available in this workspace. No public URL exists yet, and no
+deployment is claimed.
 
 ## Vehicle simulator
 
@@ -336,12 +346,14 @@ AutoGuard-AI/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .dockerignore
+├── render.yaml
+├── DEPLOYMENT.md
 ├── .github/workflows/ci.yml
 ├── .env.example
 └── README.md
 ```
 
-Planned additions: `runbooks/` markdown copies, `render.yaml`, `DEPLOYMENT.md`.
+Planned additions: `runbooks/` markdown copies and `docs/OBSERVABILITY.md`.
 
 ---
 
