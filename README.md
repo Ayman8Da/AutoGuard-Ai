@@ -21,7 +21,7 @@ operational incidents with runbooks — all linked by one correlation ID.
 | 2 | Vehicle simulator, telemetry validation, in-memory repository, fleet/telemetry API | **Complete — verified** |
 | 3 | Multi-agent architecture (LangGraph) + LLM provider abstraction | **Complete — verified** |
 | 4 | Monitoring, incidents, runbooks | **Complete — verified** |
-| 5 | Agent Cards & governance documentation | Pending |
+| 5 | Agent Cards & governance documentation | **Complete** |
 | 6 | Full automated test suite (≥80% core coverage) | Pending |
 | 7 | GitHub Actions CI | Pending |
 | 8 | Docker & local container validation | Pending |
@@ -285,7 +285,10 @@ AutoGuard-AI/
 │   ├── api/
 │   ├── integration/
 │   └── unit/
-├── docs/ARCHITECTURE.md
+├── agent_cards/                # One card per agent (purpose, I/O, safety, ownership)
+├── docs/
+│   ├── ARCHITECTURE.md
+│   └── GOVERNANCE.md           # Change control, prompt/data/incident policy
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml
@@ -293,7 +296,7 @@ AutoGuard-AI/
 └── README.md
 ```
 
-Planned additions: `agent_cards/`, `runbooks/`, `tests/failure/`,
+Planned additions: `runbooks/` markdown copies, `tests/failure/`,
 `.github/workflows/`, `Dockerfile`, `docker-compose.yml`, `DEPLOYMENT.md`.
 
 ---
