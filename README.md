@@ -23,7 +23,7 @@ operational incidents with runbooks — all linked by one correlation ID.
 | 4 | Monitoring, incidents, runbooks | **Complete — verified** |
 | 5 | Agent Cards & governance documentation | **Complete** |
 | 6 | Full automated test suite (≥80% core coverage) | **Complete — 264 tests, 97%** |
-| 7 | GitHub Actions CI | Pending |
+| 7 | GitHub Actions CI | **Configured — not executed (no GitHub remote)** |
 | 8 | Docker & local container validation | Pending |
 | 9 | Render deployment | Pending |
 | 10 | Documentation & final demonstration | Pending |
@@ -221,6 +221,26 @@ allow a MongoDB Atlas implementation later without touching the API or agents.
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m pytest --cov=app --cov=simulator --cov-report=term-missing
 ```
+
+| Suite | Focus |
+| ----- | ----- |
+| `tests/unit` | Rules, agents, runner, repositories, monitoring, incidents, LLM clients |
+| `tests/api` | Envelopes, fleet/telemetry, diagnostics, monitoring, incidents |
+| `tests/integration` | Full LangGraph workflow, retries, degraded narration |
+| `tests/failure` | Boundary rejection, provider outage, agent outage, broken monitoring |
+
+### Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pushes to `main` and on
+every pull request:
+
+- **Lint** — `ruff check .` on Python 3.12.
+- **Tests** — Python 3.11, 3.12 and 3.13 with the `mock` provider, a `--cov-fail-under=80`
+  gate and a coverage XML artifact.
+
+The workflow is committed but **has not been executed**, because this workspace has no
+GitHub remote and the `gh` CLI is not installed. The same commands pass locally on
+Windows/Python 3.14.
 
 ---
 

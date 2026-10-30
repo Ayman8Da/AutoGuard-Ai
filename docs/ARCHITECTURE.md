@@ -221,7 +221,7 @@ process-local and resets on restart; this limitation is documented rather than h
 4. **Monitoring & incidents (done):** passive Monitoring Agent, aggregated statistics, three incident triggers and three runbooks, `/monitoring` and `/incidents` APIs.
 5. **Agent cards & governance (done):** one card per agent plus change-control, prompt, data and incident policy.
 6. **Test suite (done):** unit, API, integration and dedicated failure suites; 264 tests and 97% branch coverage.
-7. GitHub Actions CI (lint, tests, coverage, image build).
+7. **CI (configured):** GitHub Actions lint + test matrix + coverage gate.
 8. Dockerfile, compose, local container validation.
 9. Render deployment (verified, not assumed).
 10. Final docs and demonstration.
