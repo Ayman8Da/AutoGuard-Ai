@@ -15,6 +15,8 @@ from app.core.config import Settings, get_settings
 from app.core.correlation import CORRELATION_HEADER
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import CorrelationIdMiddleware
+from app.services.repositories import InMemoryTelemetryRepository
+from app.services.telemetry_service import TelemetryService
 from app.utils.time import utc_now
 
 APP_DESCRIPTION = """
@@ -65,6 +67,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.state.settings = settings
     application.state.started_at = utc_now()
+    application.state.telemetry_repository = InMemoryTelemetryRepository(
+        max_entries=settings.telemetry_buffer_size
+    )
+    application.state.telemetry_service = TelemetryService(
+        application.state.telemetry_repository
+    )
 
     if settings.cors_origin_list:
         application.add_middleware(

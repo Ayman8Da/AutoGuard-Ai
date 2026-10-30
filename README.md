@@ -17,8 +17,8 @@ recommends maintenance actions and produces traceable diagnostic reports.
 | Phase | Scope | Status |
 | ----- | ----- | ------ |
 | 1 | Foundation: config, structured logging, correlation IDs, error contract, health API | **Complete — verified** |
-| 2 | Vehicle simulator + telemetry API + repositories | Pending approval |
-| 3 | Multi-agent architecture (LangGraph) + LLM provider abstraction | Pending |
+| 2 | Vehicle simulator, telemetry validation, in-memory repository, fleet/telemetry API | **Complete — verified** |
+| 3 | Multi-agent architecture (LangGraph) + LLM provider abstraction | Pending approval |
 | 4 | Monitoring, incidents, runbooks | Pending |
 | 5 | Agent Cards & governance documentation | Pending |
 | 6 | Full automated test suite (≥80% core coverage) | Pending |
@@ -27,7 +27,8 @@ recommends maintenance actions and produces traceable diagnostic reports.
 | 9 | Render deployment | Pending |
 | 10 | Documentation & final demonstration | Pending |
 
-Phase 1 verification (actual, local): **57 tests passing, 95% branch coverage, `ruff` clean**.
+Phase 1–2 verification (actual, local): **124 tests passing, 96% branch coverage
+(app + simulator), `ruff` clean**.
 
 ---
 
@@ -58,14 +59,49 @@ application, agents and test suite run fully offline.
 
 ---
 
+## Vehicle simulator
+
+The `simulator` package produces the synthetic telemetry the API consumes.
+
+```powershell
+# One frame with seeded jitter
+python -m simulator.vehicle_simulator --scenario warning --vehicle VH-002 --seed 42 --pretty
+
+# All four scenarios, exact fixture values
+python -m simulator.vehicle_simulator --all --no-jitter --pretty
+```
+
+| Scenario | Status | Temperature | Battery | Vibration | Trouble codes |
+| -------- | ------ | ----------- | ------- | --------- | ------------- |
+| `normal` | driving | 89.5 °C | 13.9 V | 2.2 mm/s | — |
+| `warning` | driving | 104.2 °C | 12.6 V | 5.8 mm/s | P0128 |
+| `critical` | driving | 121.8 °C | 11.2 V | 9.4 mm/s | P0217, P0301 |
+| `sensor_failure` | fault | `null` | 13.1 V | `null` | U0100 |
+
+Feed a generated frame into the API:
+
+```powershell
+python -m simulator.vehicle_simulator --scenario critical --vehicle VH-003 --pretty > payload.json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/vehicles/telemetry `
+  -ContentType "application/json" -InFile payload.json
+```
+
+Fixtures are exact and reproducible; `--seed` makes the optional jitter reproducible too.
+Values are plausible for a demo but are **not** validated automotive measurements.
+
+---
+
 ## API
 
-### Implemented in Phase 1
+### Implemented
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | `GET` | `/` | Service metadata (not shown in Swagger) |
 | `GET` | `/health` | Health probe with uptime, version, configuration checks |
+| `POST` | `/api/v1/vehicles/telemetry` | Validate + store a telemetry frame (201) |
+| `GET` | `/api/v1/vehicles` | List the simulated fleet with latest state |
+| `GET` | `/api/v1/vehicles/{vehicle_id}` | One vehicle + its latest telemetry record |
 | `GET` | `/docs` | Swagger UI |
 | `GET` | `/openapi.json` | OpenAPI 3 schema |
 
@@ -73,12 +109,14 @@ application, agents and test suite run fully offline.
 
 | Method | Path | Phase |
 | ------ | ---- | ----- |
-| `POST` | `/api/v1/vehicles/telemetry` | 2–3 |
-| `GET` | `/api/v1/vehicles` | 2 |
 | `GET` | `/api/v1/diagnostics` | 3 |
 | `GET` | `/api/v1/diagnostics/{diagnostic_id}` | 3 |
 | `GET` | `/api/v1/monitoring` | 4 |
 | `GET` | `/api/v1/incidents` | 4 |
+
+`POST /api/v1/vehicles/telemetry` currently returns the persisted telemetry record
+(`201`). Phase 3 attaches the multi-agent diagnostic report to the response — it is
+deliberately not faked in the meantime.
 
 Every response carries an `X-Correlation-ID` header. Errors use one envelope:
 
@@ -106,6 +144,7 @@ All variables use the `AUTOGUARD_` prefix and can be set in `.env`.
 | `AUTOGUARD_LOG_LEVEL` | `INFO` | Standard Python log levels |
 | `AUTOGUARD_LOG_FORMAT` | `json` | `json` or `console` |
 | `AUTOGUARD_CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins |
+| `AUTOGUARD_TELEMETRY_BUFFER_SIZE` | `1000` | Telemetry records kept in memory per process |
 | `AUTOGUARD_LLM_PROVIDER` | `mock` | `mock`, `groq` or `ollama` |
 | `AUTOGUARD_LLM_MODEL` | `llama-3.3-70b-versatile` | Model name for the active provider |
 | `AUTOGUARD_GROQ_API_KEY` | *(empty)* | Required only for `groq`; stored as `SecretStr` |
@@ -115,40 +154,57 @@ All variables use the `AUTOGUARD_` prefix and can be set in `.env`.
 Startup fails fast if `AUTOGUARD_LLM_PROVIDER=groq` is set without an API key. Secrets are
 never logged or returned by the API.
 
+**Storage:** telemetry lives in a bounded in-process repository. Restarting the service
+clears it. The `TelemetryRepository` interface allows a MongoDB Atlas implementation later
+without touching the API or agents.
+
 ---
 
 ## Testing & quality
 
 ```powershell
 .\.venv\Scripts\python.exe -m ruff check .
-.\.venv\Scripts\python.exe -m pytest --cov=app --cov-report=term-missing
+.\.venv\Scripts\python.exe -m pytest --cov=app --cov=simulator --cov-report=term-missing
 ```
 
 ---
 
-## Project layout (Phase 1)
+## Project layout (Phase 2)
 
 ```text
 AutoGuard-AI/
 ├── app/
-│   ├── main.py                 # App factory, lifespan, middleware wiring
+│   ├── main.py                 # App factory, lifespan, middleware/service wiring
 │   ├── api/
 │   │   ├── system.py           # / and /health
+│   │   ├── deps.py             # Dependency providers
 │   │   ├── exception_handlers.py
-│   │   └── v1/router.py        # Versioned router (domain routes land here)
+│   │   └── v1/
+│   │       ├── router.py
+│   │       └── endpoints/vehicles.py   # Telemetry + fleet routes
 │   ├── core/
 │   │   ├── config.py           # Pydantic settings (typed, validated)
 │   │   ├── correlation.py      # Correlation ID generation/sanitisation
 │   │   ├── errors.py           # Domain error hierarchy
 │   │   ├── logging.py          # JSON logging + context filter
 │   │   └── middleware.py       # Request tracing
-│   ├── models/common.py        # Shared response schemas
+│   ├── models/
+│   │   ├── common.py           # Error/health schemas
+│   │   ├── enums.py            # Vehicle status, fuel type
+│   │   ├── telemetry.py        # Strict telemetry contracts
+│   │   └── vehicle.py          # Fleet read models
+│   ├── services/
+│   │   ├── fleet.py            # 5 simulated vehicles
+│   │   ├── repositories.py     # TelemetryRepository + in-memory store
+│   │   └── telemetry_service.py
 │   ├── agents/                 # Phase 3
 │   ├── orchestration/          # Phase 3
 │   ├── monitoring/             # Phase 4
 │   ├── incidents/              # Phase 4
-│   ├── services/               # Phase 2+
 │   └── utils/
+├── simulator/
+│   ├── scenarios.py            # Four deterministic scenarios
+│   └── vehicle_simulator.py    # Seeded jitter + CLI
 ├── tests/
 │   ├── unit/
 │   └── api/
@@ -160,13 +216,12 @@ AutoGuard-AI/
 └── README.md
 ```
 
-Planned additions: `simulator/`, `agent_cards/`, `runbooks/`, `tests/integration/`,
-`tests/failure/`, `.github/workflows/`, `Dockerfile`, `docker-compose.yml`,
-`DEPLOYMENT.md`.
+Planned additions: `agent_cards/`, `runbooks/`, `tests/integration/`, `tests/failure/`,
+`.github/workflows/`, `Dockerfile`, `docker-compose.yml`, `DEPLOYMENT.md`.
 
 ---
 
-## Engineering decisions (Phase 1)
+## Engineering decisions (Phases 1–2)
 
 - **Modular monolith, not microservices.** One FastAPI process keeps the multi-agent
   workflow debuggable while preserving clean package boundaries.
@@ -182,5 +237,12 @@ Planned additions: `simulator/`, `agent_cards/`, `runbooks/`, `tests/integration
   API key; Groq is opt-in via environment configuration.
 - **Configuration is validated at startup.** Invalid log levels, API prefixes or a
   missing Groq key fail fast rather than at the first request.
+- **`null` means "sensor unavailable", not "field missing".** A sensor-failure payload is
+  accepted and stored so the Diagnostic Agent can identify it; only structurally invalid
+  or physically impossible values are rejected with 422.
+- **Telemetry ingestion is fleet-scoped.** Unknown vehicles return `404
+  VEHICLE_NOT_FOUND` instead of silently polluting the store.
+- **Bounded in-memory repository.** Prevents unbounded growth during demos and keeps the
+  storage contract swappable.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full target architecture.

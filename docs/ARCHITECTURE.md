@@ -1,6 +1,7 @@
 # AutoGuard AI — Architecture
 
-Status: **Phase 1 complete** (foundation). Later phases are marked *planned*.
+Status: **Phases 1–2 complete** (foundation + telemetry ingestion). Later phases are
+marked *planned*.
 
 ## 1. Goals and non-goals
 
@@ -40,6 +41,38 @@ flowchart LR
 The **Monitoring Agent observes** agent executions; it is not a node in the vehicle
 diagnosis chain. A failure in diagnosis cannot disable monitoring, and monitoring
 failures are logged without masking the diagnostic result.
+
+### Telemetry contract (implemented)
+
+```json
+{
+  "vehicle_id": "VH-003",
+  "timestamp": "2026-10-30T10:46:47Z",
+  "status": "driving",
+  "sensors": {
+    "engine_temperature_c": 122.92,
+    "battery_voltage_v": 10.92,
+    "engine_vibration_mm_s": 8.95
+  },
+  "error_codes": ["P0217", "P0301"]
+}
+```
+
+Validation rules enforced at the API boundary:
+
+- `vehicle_id` must exist in the 5-vehicle simulated fleet (otherwise
+  `404 VEHICLE_NOT_FOUND`);
+- timestamps must be timezone-aware and at most 5 minutes in the future;
+- sensor values must be finite and inside broad physical bounds — outside values are
+  rejected as corrupt, while `null` means "sensor unavailable" and is accepted;
+- DTCs use the `[PCBU]` + 4 hex format, are upper-cased and de-duplicated;
+- unknown fields are rejected (`extra="forbid"`).
+
+Scenarios (exact fixtures, optional seeded jitter): `normal`, `warning`, `critical`,
+`sensor_failure`. Ingestion is stored in a bounded in-memory repository (default 1000
+records) behind `TelemetryRepository`; records expose `telemetry_id`, `correlation_id`,
+`received_at` and the validated frame. Phase 3 adds the diagnostic report to this
+response.
 
 ## 3. Layered structure
 
@@ -170,7 +203,7 @@ resets on restart; this limitation is documented rather than hidden.
 ## 11. Phase plan
 
 1. **Foundation (done):** settings, logging, correlation IDs, errors, health, docs.
-2. Simulator + telemetry API + repositories.
+2. **Telemetry (done):** simulator, strict validation, repositories, fleet/telemetry API.
 3. LangGraph agents + LLM abstraction (mock/Groq/Ollama).
 4. Monitoring, incidents, runbooks.
 5. Agent Cards & governance docs.
