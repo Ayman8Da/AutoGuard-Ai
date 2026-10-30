@@ -1,0 +1,41 @@
+# --- Version control and local tooling ---
+.git
+.gitignore
+.github
+.venv
+venv
+.idea
+.vscode
+
+# --- Python caches and build artifacts ---
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+
+# --- Secrets and local state ---
+.env
+.env.*
+!.env.example
+server.log
+server.err.log
+server.pid
+
+# --- Tests, docs and demo assets (not needed at runtime) ---
+tests
+docs
+agent_cards
+runbooks
+*.md
+!requirements.txt
+
+# --- Container / deploy files ---
+Dockerfile
+.dockerignore
+docker-compose.yml
+render.yaml
+DEPLOYMENT.md

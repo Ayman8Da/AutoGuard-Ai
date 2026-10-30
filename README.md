@@ -24,7 +24,7 @@ operational incidents with runbooks — all linked by one correlation ID.
 | 5 | Agent Cards & governance documentation | **Complete** |
 | 6 | Full automated test suite (≥80% core coverage) | **Complete — 264 tests, 97%** |
 | 7 | GitHub Actions CI | **Configured — not executed (no GitHub remote)** |
-| 8 | Docker & local container validation | Pending |
+| 8 | Docker & local container validation | **Prepared — not validated (Docker unavailable here)** |
 | 9 | Render deployment | Pending |
 | 10 | Documentation & final demonstration | Pending |
 
@@ -57,6 +57,23 @@ Invoke-RestMethod http://localhost:8000/health
 
 No external API key is required. `AUTOGUARD_LLM_PROVIDER=mock` is the default so the
 application, agents and test suite run fully offline.
+
+### Container
+
+```powershell
+docker build -t autoguard-ai .
+docker run --rm -p 8000:8000 autoguard-ai
+# or
+docker compose up --build
+```
+
+The image runs as an unprivileged user, defaults to production JSON logging and honours a
+runtime `PORT` (used by Render). The default provider is `mock`, so no secret is baked in.
+
+> **Verification status:** the Dockerfile, `.dockerignore`, compose file and CI image job
+> are provided, but **Docker is not installed in this workspace**, so the image has not
+> been built or run here. The CI workflow builds the image and smoke-tests `/health` when
+> pushed to a GitHub remote.
 
 ---
 
@@ -237,10 +254,13 @@ every pull request:
 - **Lint** — `ruff check .` on Python 3.12.
 - **Tests** — Python 3.11, 3.12 and 3.13 with the `mock` provider, a `--cov-fail-under=80`
   gate and a coverage XML artifact.
+- **Docker** — builds the image, starts it with `PORT=8000` and polls `/health` before
+  cleaning up.
 
 The workflow is committed but **has not been executed**, because this workspace has no
-GitHub remote and the `gh` CLI is not installed. The same commands pass locally on
-Windows/Python 3.14.
+GitHub remote and the `gh` CLI is not installed. The lint and test jobs' commands pass
+locally on Windows/Python 3.14; the Docker job is unverified because Docker is not
+installed here.
 
 ---
 
@@ -313,12 +333,15 @@ AutoGuard-AI/
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
+├── .github/workflows/ci.yml
 ├── .env.example
 └── README.md
 ```
 
-Planned additions: `runbooks/` markdown copies, `tests/failure/`,
-`.github/workflows/`, `Dockerfile`, `docker-compose.yml`, `DEPLOYMENT.md`.
+Planned additions: `runbooks/` markdown copies, `render.yaml`, `DEPLOYMENT.md`.
 
 ---
 
