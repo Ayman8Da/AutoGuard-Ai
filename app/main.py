@@ -8,6 +8,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agents.diagnostic import DiagnosticAgent
+from app.agents.llm import build_narrative_client
+from app.agents.maintenance import MaintenanceAgent
+from app.agents.reporting import ReportingAgent
+from app.agents.risk import RiskAssessmentAgent
 from app.api.exception_handlers import register_exception_handlers
 from app.api.system import router as system_router
 from app.api.v1.router import api_router
@@ -15,6 +20,9 @@ from app.core.config import Settings, get_settings
 from app.core.correlation import CORRELATION_HEADER
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import CorrelationIdMiddleware
+from app.orchestration.workflow import DiagnosticWorkflow
+from app.services.diagnostics_repository import InMemoryDiagnosticRepository
+from app.services.diagnostics_service import DiagnosticsService
 from app.services.repositories import InMemoryTelemetryRepository
 from app.services.telemetry_service import TelemetryService
 from app.utils.time import utc_now
@@ -72,6 +80,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.telemetry_service = TelemetryService(
         application.state.telemetry_repository
+    )
+
+    narrative_client = build_narrative_client(settings)
+    application.state.diagnostic_workflow = DiagnosticWorkflow(
+        diagnostic_agent=DiagnosticAgent(
+            narrative_client, max_llm_retries=settings.agent_max_retries
+        ),
+        risk_agent=RiskAssessmentAgent(),
+        maintenance_agent=MaintenanceAgent(),
+        reporting_agent=ReportingAgent(),
+        max_retries=settings.agent_max_retries,
+    )
+    application.state.diagnostics_repository = InMemoryDiagnosticRepository(
+        max_entries=settings.diagnostics_buffer_size
+    )
+    application.state.diagnostics_service = DiagnosticsService(
+        application.state.diagnostics_repository,
+        application.state.diagnostic_workflow,
     )
 
     if settings.cors_origin_list:

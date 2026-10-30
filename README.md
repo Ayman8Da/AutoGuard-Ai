@@ -18,7 +18,7 @@ recommends maintenance actions and produces traceable diagnostic reports.
 | ----- | ----- | ------ |
 | 1 | Foundation: config, structured logging, correlation IDs, error contract, health API | **Complete — verified** |
 | 2 | Vehicle simulator, telemetry validation, in-memory repository, fleet/telemetry API | **Complete — verified** |
-| 3 | Multi-agent architecture (LangGraph) + LLM provider abstraction | Pending approval |
+| 3 | Multi-agent architecture (LangGraph) + LLM provider abstraction | **Complete — verified** |
 | 4 | Monitoring, incidents, runbooks | Pending |
 | 5 | Agent Cards & governance documentation | Pending |
 | 6 | Full automated test suite (≥80% core coverage) | Pending |
@@ -27,7 +27,7 @@ recommends maintenance actions and produces traceable diagnostic reports.
 | 9 | Render deployment | Pending |
 | 10 | Documentation & final demonstration | Pending |
 
-Phase 1–2 verification (actual, local): **124 tests passing, 96% branch coverage
+Phase 1–3 verification (actual, local): **226 tests passing, 97% branch coverage
 (app + simulator), `ruff` clean**.
 
 ---
@@ -99,9 +99,11 @@ Values are plausible for a demo but are **not** validated automotive measurement
 | ------ | ---- | ----------- |
 | `GET` | `/` | Service metadata (not shown in Swagger) |
 | `GET` | `/health` | Health probe with uptime, version, configuration checks |
-| `POST` | `/api/v1/vehicles/telemetry` | Validate + store a telemetry frame (201) |
+| `POST` | `/api/v1/vehicles/telemetry` | Validate + store telemetry, run the agent workflow, return the report (200) |
 | `GET` | `/api/v1/vehicles` | List the simulated fleet with latest state |
 | `GET` | `/api/v1/vehicles/{vehicle_id}` | One vehicle + its latest telemetry record |
+| `GET` | `/api/v1/diagnostics` | Recent diagnostic report summaries, newest first (`?limit=1..200`) |
+| `GET` | `/api/v1/diagnostics/{diagnostic_id}` | Full report: findings, risk, maintenance plan, agent ledger |
 | `GET` | `/docs` | Swagger UI |
 | `GET` | `/openapi.json` | OpenAPI 3 schema |
 
@@ -109,14 +111,34 @@ Values are plausible for a demo but are **not** validated automotive measurement
 
 | Method | Path | Phase |
 | ------ | ---- | ----- |
-| `GET` | `/api/v1/diagnostics` | 3 |
-| `GET` | `/api/v1/diagnostics/{diagnostic_id}` | 3 |
 | `GET` | `/api/v1/monitoring` | 4 |
 | `GET` | `/api/v1/incidents` | 4 |
 
-`POST /api/v1/vehicles/telemetry` currently returns the persisted telemetry record
-(`201`). Phase 3 attaches the multi-agent diagnostic report to the response — it is
-deliberately not faked in the meantime.
+A single ingestion call returns the complete diagnosis:
+
+```json
+{
+  "diagnostic_id": "DIAG-20261030-8A1F...",
+  "workflow_id": "WF-20261030-4C2B...",
+  "telemetry_id": "TEL-20261030-9F1C...",
+  "correlation_id": "CORR-20261030-9F1C...",
+  "vehicle_id": "VH-003",
+  "status": "completed",
+  "analysis_mode": "deterministic",
+  "risk": { "level": "critical", "score": 26, "hard_override": true, "reasons": [] },
+  "maintenance": { "priority": "immediate", "actions": [], "repair_performed": false },
+  "agent_executions": [
+    { "agent_name": "OrchestratorAgent", "status": "success", "attempt": 1 },
+    { "agent_name": "DiagnosticAgent", "status": "success", "attempt": 1 }
+  ],
+  "warnings": [],
+  "disclaimer": "Simulated telemetry only. ..."
+}
+```
+
+(Abridged — the real payload includes full findings, DTC interpretations and per-agent
+timings.) `risk.level` is always computed by deterministic rules; the LLM may only
+rephrase the summary.
 
 Every response carries an `X-Correlation-ID` header. Errors use one envelope:
 
@@ -145,6 +167,7 @@ All variables use the `AUTOGUARD_` prefix and can be set in `.env`.
 | `AUTOGUARD_LOG_FORMAT` | `json` | `json` or `console` |
 | `AUTOGUARD_CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins |
 | `AUTOGUARD_TELEMETRY_BUFFER_SIZE` | `1000` | Telemetry records kept in memory per process |
+| `AUTOGUARD_DIAGNOSTICS_BUFFER_SIZE` | `500` | Diagnostic reports kept in memory per process |
 | `AUTOGUARD_LLM_PROVIDER` | `mock` | `mock`, `groq` or `ollama` |
 | `AUTOGUARD_LLM_MODEL` | `llama-3.3-70b-versatile` | Model name for the active provider |
 | `AUTOGUARD_GROQ_API_KEY` | *(empty)* | Required only for `groq`; stored as `SecretStr` |
@@ -154,9 +177,9 @@ All variables use the `AUTOGUARD_` prefix and can be set in `.env`.
 Startup fails fast if `AUTOGUARD_LLM_PROVIDER=groq` is set without an API key. Secrets are
 never logged or returned by the API.
 
-**Storage:** telemetry lives in a bounded in-process repository. Restarting the service
-clears it. The `TelemetryRepository` interface allows a MongoDB Atlas implementation later
-without touching the API or agents.
+**Storage:** telemetry and diagnostic reports live in bounded in-process repositories.
+Restarting the service clears them. The `TelemetryRepository` and `DiagnosticRepository`
+interfaces allow a MongoDB Atlas implementation later without touching the API or agents.
 
 ---
 
@@ -169,7 +192,7 @@ without touching the API or agents.
 
 ---
 
-## Project layout (Phase 2)
+## Project layout (Phase 3)
 
 ```text
 AutoGuard-AI/
@@ -181,7 +204,9 @@ AutoGuard-AI/
 │   │   ├── exception_handlers.py
 │   │   └── v1/
 │   │       ├── router.py
-│   │       └── endpoints/vehicles.py   # Telemetry + fleet routes
+│   │       └── endpoints/
+│   │           ├── vehicles.py         # Telemetry ingestion + fleet routes
+│   │           └── diagnostics.py      # Report list/detail routes
 │   ├── core/
 │   │   ├── config.py           # Pydantic settings (typed, validated)
 │   │   ├── correlation.py      # Correlation ID generation/sanitisation
@@ -190,15 +215,27 @@ AutoGuard-AI/
 │   │   └── middleware.py       # Request tracing
 │   ├── models/
 │   │   ├── common.py           # Error/health schemas
+│   │   ├── diagnostics.py      # Findings, risk, maintenance, report models
 │   │   ├── enums.py            # Vehicle status, fuel type
 │   │   ├── telemetry.py        # Strict telemetry contracts
 │   │   └── vehicle.py          # Fleet read models
+│   ├── agents/
+│   │   ├── diagnostic.py       # Findings + DTC interpretation + narrative
+│   │   ├── llm.py              # Mock/Groq/Ollama clients, strict JSON parsing
+│   │   ├── maintenance.py      # Prioritised advisory actions
+│   │   ├── reporting.py        # Report assembly, disclaimer, status
+│   │   ├── risk.py             # Deterministic risk classification
+│   │   └── rules.py            # Sensor bands, DTC catalogue, risk bands
+│   ├── orchestration/
+│   │   ├── runner.py           # Retries + AgentExecution ledger
+│   │   ├── state.py            # Graph state
+│   │   └── workflow.py         # LangGraph graph + Orchestrator ledger entry
 │   ├── services/
+│   │   ├── diagnostics_repository.py
+│   │   ├── diagnostics_service.py
 │   │   ├── fleet.py            # 5 simulated vehicles
 │   │   ├── repositories.py     # TelemetryRepository + in-memory store
 │   │   └── telemetry_service.py
-│   ├── agents/                 # Phase 3
-│   ├── orchestration/          # Phase 3
 │   ├── monitoring/             # Phase 4
 │   ├── incidents/              # Phase 4
 │   └── utils/
@@ -206,8 +243,9 @@ AutoGuard-AI/
 │   ├── scenarios.py            # Four deterministic scenarios
 │   └── vehicle_simulator.py    # Seeded jitter + CLI
 ├── tests/
-│   ├── unit/
-│   └── api/
+│   ├── api/
+│   ├── integration/
+│   └── unit/
 ├── docs/ARCHITECTURE.md
 ├── requirements.txt
 ├── requirements-dev.txt
@@ -216,12 +254,12 @@ AutoGuard-AI/
 └── README.md
 ```
 
-Planned additions: `agent_cards/`, `runbooks/`, `tests/integration/`, `tests/failure/`,
+Planned additions: `agent_cards/`, `runbooks/`, `tests/failure/`,
 `.github/workflows/`, `Dockerfile`, `docker-compose.yml`, `DEPLOYMENT.md`.
 
 ---
 
-## Engineering decisions (Phases 1–2)
+## Engineering decisions (Phases 1–3)
 
 - **Modular monolith, not microservices.** One FastAPI process keeps the multi-agent
   workflow debuggable while preserving clean package boundaries.
@@ -244,5 +282,16 @@ Planned additions: `agent_cards/`, `runbooks/`, `tests/integration/`, `tests/fai
   VEHICLE_NOT_FOUND` instead of silently polluting the store.
 - **Bounded in-memory repository.** Prevents unbounded growth during demos and keeps the
   storage contract swappable.
+- **Risk is deterministic, never LLM-assigned.** Sensor bands, DTC weights and hard
+  safety overrides live in `app/agents/rules.py`; identical telemetry always produces the
+  same score and level. An LLM failure cannot change the classification.
+- **The LLM only writes prose.** It receives already-computed findings, must answer with
+  `{"summary": "..."}`, and cannot claim a repair happened. Invalid JSON or provider
+  outages degrade to a deterministic summary and a `LLM_NARRATIVE_UNAVAILABLE` warning.
+- **Agents retry within a bounded budget.** `AgentRunner` records every attempt and raises
+  `AGENT_EXECUTION_FAILED` only after exhausting the budget, so partial failures are never
+  silently reported as success.
+- **The Orchestrator is observed, not magical.** The workflow records its own execution
+  alongside the four diagnostic agents, making end-to-end timing visible in the report.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full target architecture.

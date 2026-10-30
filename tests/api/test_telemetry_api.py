@@ -30,39 +30,42 @@ def _payload(
     return payload
 
 
-def test_valid_telemetry_is_stored(client: TestClient) -> None:
+def test_valid_telemetry_returns_diagnostic_report(client: TestClient) -> None:
     payload = _payload()
 
     response = client.post(TELEMETRY_URL, json=payload)
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     body = response.json()
     assert _TELEMETRY_ID_PATTERN.fullmatch(body["telemetry_id"])
+    assert body["diagnostic_id"].startswith("DIAG-")
+    assert body["workflow_id"].startswith("WF-")
     assert body["correlation_id"] == response.headers[CORRELATION_HEADER]
     assert body["telemetry"]["vehicle_id"] == "VH-001"
     assert body["telemetry"]["sensors"]["engine_temperature_c"] == 89.5
-    assert datetime.fromisoformat(body["received_at"]).tzinfo is not None
+    assert datetime.fromisoformat(body["created_at"]).tzinfo is not None
+    assert body["risk"]["level"] == "low"
     VehicleTelemetry.model_validate(body["telemetry"])
 
 
 def test_warning_scenario_keeps_trouble_code(client: TestClient) -> None:
     response = client.post(TELEMETRY_URL, json=_payload(Scenario.WARNING))
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     assert response.json()["telemetry"]["error_codes"] == ["P0128"]
 
 
 def test_critical_scenario_keeps_all_trouble_codes(client: TestClient) -> None:
     response = client.post(TELEMETRY_URL, json=_payload(Scenario.CRITICAL))
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     assert response.json()["telemetry"]["error_codes"] == ["P0217", "P0301"]
 
 
 def test_sensor_failure_payload_is_accepted(client: TestClient) -> None:
     response = client.post(TELEMETRY_URL, json=_payload(Scenario.SENSOR_FAILURE))
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     sensors = response.json()["telemetry"]["sensors"]
     assert sensors["engine_temperature_c"] is None
     assert sensors["engine_vibration_mm_s"] is None

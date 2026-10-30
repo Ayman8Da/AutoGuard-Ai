@@ -1,7 +1,7 @@
 # AutoGuard AI — Architecture
 
-Status: **Phases 1–2 complete** (foundation + telemetry ingestion). Later phases are
-marked *planned*.
+Status: **Phases 1–3 complete** (foundation, telemetry ingestion and the multi-agent
+workflow). Later phases are marked *planned*.
 
 ## 1. Goals and non-goals
 
@@ -98,70 +98,76 @@ diagnostic rules.
 | Orchestrator | Telemetry payload | Workflow result + trace | Yes |
 | Diagnostic | Validated telemetry | Findings, DTC interpretation, suspected faults | Hybrid (rules + LLM narrative) |
 | Risk Assessment | Findings + sensor deltas | `LOW`/`MEDIUM`/`HIGH`/`CRITICAL` + reasons | **Fully deterministic** |
-| Maintenance | Findings + risk | Prioritised actions with rationale | Hybrid (LLM text, rules for priority) |
+| Maintenance | Findings + risk | Prioritised actions with rationale | **Fully deterministic** |
 | Reporting | All previous results | Structured report + correlation ID | Yes |
 | Monitoring | Execution events | Traces, statistics, incidents | Yes |
 
-**Safety rule:** the LLM may describe findings and maintenance rationale, but it may not
-assign risk levels, compute safety scores or claim a repair was performed. Those fields
-are produced by code and validated by Pydantic before leaving the Risk agent.
+**Safety rule:** the LLM may only rephrase the summary of already-computed findings. It
+may not assign risk levels, compute safety scores, invent readings or claim a repair was
+performed. Risk and maintenance priority are produced by code and validated by Pydantic
+before leaving their agents.
 
-## 5. Workflow (target)
+## 5. Workflow (implemented)
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant O as Orchestrator
-    participant M as Monitoring
     participant D as Diagnostic
     participant R as Risk
     participant A as Maintenance
     participant P as Reporting
 
     C->>O: POST /api/v1/vehicles/telemetry (X-Correlation-ID)
-    O->>M: execution_started(orchestrator)
-    O->>D: validate + diagnose(payload)
-    D-->>O: findings | exception
-    O->>M: execution_finished(diagnostic, duration, status)
-    O->>R: assess(findings)
-    R-->>O: risk level + reasons
-    O->>A: recommend(findings, risk)
-    A-->>O: prioritised actions
-    O->>P: build_report(all results)
-    P-->>O: report (correlation ID, timestamps)
-    O->>M: execution_finished(workflow)
-    O-->>C: 200 report | 5xx safe failure envelope
+    O->>D: analyze(telemetry)
+    D-->>O: findings + DTC interpretations + narrative
+    O->>R: assess(telemetry, diagnostic)
+    R-->>O: deterministic risk level + reasons
+    O->>A: recommend(diagnostic, risk)
+    A-->>O: prioritised advisory actions
+    O->>P: build(telemetry, diagnostic, risk, maintenance)
+    P-->>O: report (diagnostic ID, workflow ID, executions)
+    O-->>C: 200 report | 500 AGENT_EXECUTION_FAILED envelope
 ```
 
-### Failure path
+LangGraph executes `START → diagnostic → risk → maintenance → reporting → END`. The
+Orchestrator is the graph controller: it owns sequencing, the retry budget and the
+execution ledger, and records its own `AgentExecution` for end-to-end timing.
 
-1. Agent raises → Monitoring records status `FAILED`, error type/message and duration.
-2. Incident ID is generated and linked to the correlation ID.
-3. A runbook is selected (`agent_failure`, `llm_provider_failure`, `invalid_telemetry`).
-4. One safe retry is attempted for idempotent steps only.
-5. If the retry fails, the workflow returns a failure (never a fabricated report) and
-   the incident is escalated and stored.
+### Failure path (implemented core)
 
-## 6. State and contracts (planned)
+1. An agent raises → `AgentRunner` records a `FAILED` execution with error type/message
+   and duration.
+2. The attempt is retried up to `AUTOGUARD_AGENT_MAX_RETRIES` (default 1).
+3. If every attempt fails, an `AgentExecutionError` aborts the workflow with
+   `AGENT_EXECUTION_FAILED`; no report is fabricated.
+4. LLM narrative failures are *not* agent failures: the Diagnostic Agent falls back to a
+   deterministic summary and the report records `LLM_NARRATIVE_UNAVAILABLE`.
+5. Incident creation, runbook selection and escalation land in Phase 4.
 
-The LangGraph state will be a typed `TypedDict` carrying:
+## 6. State and contracts (implemented)
+
+The LangGraph state is a typed `TypedDict` carrying:
 
 ```text
-correlation_id, workflow_id, telemetry, diagnostic, risk, maintenance,
-report, trace[], incidents[], status, error
+telemetry_record, workflow_id, diagnostic, risk, maintenance, report
 ```
 
-Agents exchange **only Pydantic-validated JSON-compatible objects**. No agent reads
-mutable global state, which keeps each node independently unit-testable.
+Execution records live on the per-invocation `AgentRunner` rather than in graph state,
+so attempts from a node that ultimately failed are still retained. Agents exchange
+**only Pydantic-validated objects**. No agent reads mutable global state, which keeps each
+node independently unit-testable.
 
 ## 7. Observability contract
 
-Current (Phase 1):
+Current (Phases 1–3):
 
 - `X-Correlation-ID` accepted/generated per request, returned on every response.
 - JSON logs include `timestamp`, `level`, `logger`, `message`, `correlation_id`,
   `service`, `environment` plus event-specific fields (`path`, `duration_ms`, `status_code`).
 - Error envelope always embeds the correlation ID.
+- Every agent attempt produces an `AgentExecution` (`agent_name`, `workflow_id`,
+  `correlation_id`, `status`, `attempt`, timings, error type/message) attached to the report.
 
 Planned (Phase 4):
 
@@ -204,7 +210,7 @@ resets on restart; this limitation is documented rather than hidden.
 
 1. **Foundation (done):** settings, logging, correlation IDs, errors, health, docs.
 2. **Telemetry (done):** simulator, strict validation, repositories, fleet/telemetry API.
-3. LangGraph agents + LLM abstraction (mock/Groq/Ollama).
+3. **Multi-agent workflow (done):** LangGraph graph, deterministic risk engine, mock/Groq/Ollama narrative clients, report persistence and diagnostics API.
 4. Monitoring, incidents, runbooks.
 5. Agent Cards & governance docs.
 6. Unit/integration/API/failure tests, ≥80% coverage.

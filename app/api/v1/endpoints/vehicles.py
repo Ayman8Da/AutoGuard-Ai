@@ -1,11 +1,13 @@
-"""Vehicle fleet and telemetry ingestion endpoints."""
+"""Vehicle fleet, telemetry ingestion and diagnosis endpoints."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, status
 
-from app.api.deps import TelemetryServiceDep
-from app.models.telemetry import TelemetryRecord, VehicleTelemetry
+from app.api.deps import DiagnosticsServiceDep, TelemetryServiceDep
+from app.core.correlation import get_correlation_id
+from app.models.diagnostics import DiagnosticReport
+from app.models.telemetry import VehicleTelemetry
 from app.models.vehicle import VehicleDetail, VehicleSummary
 
 router = APIRouter(tags=["Vehicles"])
@@ -13,28 +15,32 @@ router = APIRouter(tags=["Vehicles"])
 
 @router.post(
     "/vehicles/telemetry",
-    response_model=TelemetryRecord,
-    status_code=status.HTTP_201_CREATED,
-    summary="Ingest a vehicle telemetry frame",
+    response_model=DiagnosticReport,
+    status_code=status.HTTP_200_OK,
+    summary="Ingest telemetry and run the diagnostic workflow",
     description=(
-        "Validates and stores one simulated telemetry frame. Unknown fields, "
-        "implausible sensor values, naive timestamps and malformed diagnostic "
-        "trouble codes are rejected with a 422 error envelope. The multi-agent "
-        "diagnostic workflow will be attached to this response in a later phase."
+        "Validates and stores one simulated telemetry frame, then runs the "
+        "multi-agent workflow (Diagnostic → Risk Assessment → Maintenance → "
+        "Reporting). The response is the completed report, including a "
+        "deterministic risk level and an advisory maintenance plan. No inspection "
+        "or repair is performed. Unknown fields, implausible sensor values, naive "
+        "timestamps and malformed diagnostic trouble codes are rejected with a 422 "
+        "error envelope."
     ),
     responses={
         404: {"description": "Vehicle is not part of the simulated fleet"},
         422: {"description": "Payload failed validation"},
+        500: {"description": "An agent failed after exhausting its retry budget"},
     },
 )
 async def ingest_telemetry(
     payload: VehicleTelemetry,
-    request: Request,
-    service: TelemetryServiceDep,
-) -> TelemetryRecord:
-    """Store a validated telemetry frame and return the persisted record."""
-    correlation_id = request.state.correlation_id
-    return service.ingest(payload, correlation_id=correlation_id)
+    telemetry_service: TelemetryServiceDep,
+    diagnostics_service: DiagnosticsServiceDep,
+) -> DiagnosticReport:
+    """Store a validated frame and return its diagnostic report."""
+    record = telemetry_service.ingest(payload, correlation_id=get_correlation_id())
+    return await diagnostics_service.analyze(record)
 
 
 @router.get(

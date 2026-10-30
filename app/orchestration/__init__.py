@@ -1,1 +1,1 @@
-"""LangGraph workflow orchestration and shared agent state."""
+"""Multi-agent orchestration (LangGraph workflow and execution ledger)."""
