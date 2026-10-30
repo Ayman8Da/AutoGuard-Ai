@@ -1,7 +1,9 @@
 # AutoGuard AI — Architecture
 
-Status: **Phases 1–4 complete** (foundation, telemetry ingestion, the multi-agent
-workflow, monitoring and incidents). Later phases are marked *planned*.
+Status: **Phases 1–10 complete** as an engineering demonstration. Foundation, telemetry
+ingestion, the multi-agent workflow, monitoring, incidents and documentation are verified
+locally. CI, Docker and Render assets exist but are **unverified** (see
+[DEPLOYMENT.md](../DEPLOYMENT.md#8-what-has-and-has-not-been-verified)).
 
 ## 1. Goals and non-goals
 
@@ -183,6 +185,10 @@ Current (Phases 1–4):
   correlation/workflow/diagnostic links, filterable by `status`, `severity` and
   `vehicle_id`.
 
+See [OBSERVABILITY.md](OBSERVABILITY.md) for the full signal map, log event names and a
+request-debugging procedure, and [runbooks/](../runbooks/) for the operational response to
+each incident type.
+
 ## 8. Persistence
 
 Phase 2+ uses repository interfaces (`TelemetryRepository`, `DiagnosticRepository`) with
@@ -224,4 +230,4 @@ process-local and resets on restart; this limitation is documented rather than h
 7. **CI (configured):** GitHub Actions lint + test matrix + coverage gate + Docker smoke job.
 8. **Container (prepared):** Dockerfile, compose file and CI image job; not built locally because Docker is unavailable.
 9. **Render deployment (prepared, not performed):** `render.yaml` and `DEPLOYMENT.md`; no account or credentials were available.
-10. Final docs and demonstration.
+10. **Documentation (done):** observability guide, three operational runbooks, README demo walkthrough.

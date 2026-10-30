@@ -105,5 +105,5 @@ A change is mergeable only when all of the following pass locally and in CI:
 - In-memory state is process-local and lost on restart.
 - No automated incident acknowledgement/resolution workflow.
 - No real vehicle integration, safety certification or validated diagnosis.
-- Docker and deployment verification depend on external tooling/accounts; see
-  `DEPLOYMENT.md` when it lands in Phase 9.
+- Docker and deployment verification depend on external tooling/accounts; the current
+  verified/unverified status is recorded in [DEPLOYMENT.md](../DEPLOYMENT.md).

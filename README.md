@@ -26,7 +26,7 @@ operational incidents with runbooks — all linked by one correlation ID.
 | 7 | GitHub Actions CI | **Configured — not executed (no GitHub remote)** |
 | 8 | Docker & local container validation | **Prepared — not validated (Docker unavailable here)** |
 | 9 | Render deployment | **Prepared — not deployed (no credentials here)** |
-| 10 | Documentation & final demonstration | Pending |
+| 10 | Documentation & final demonstration | **Complete** |
 
 Phase 1–6 verification (actual, local): **264 tests passing, 97% branch coverage
 (app + simulator), `ruff` clean**.
@@ -274,7 +274,7 @@ installed here.
 
 ---
 
-## Project layout (Phase 3)
+## Project layout
 
 ```text
 AutoGuard-AI/
@@ -339,7 +339,12 @@ AutoGuard-AI/
 ├── agent_cards/                # One card per agent (purpose, I/O, safety, ownership)
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   └── GOVERNANCE.md           # Change control, prompt/data/incident policy
+│   ├── GOVERNANCE.md           # Change control, prompt/data/incident policy
+│   └── OBSERVABILITY.md        # Signals, log events, monitoring, debugging
+├── runbooks/
+│   ├── high-risk-vehicle.md
+│   ├── agent-failure.md
+│   └── llm-provider-failure.md
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pyproject.toml
@@ -353,7 +358,76 @@ AutoGuard-AI/
 └── README.md
 ```
 
-Planned additions: `runbooks/` markdown copies and `docs/OBSERVABILITY.md`.
+---
+
+## Documentation
+
+| Document | Contents |
+| -------- | -------- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System context, workflow, data contracts, deployment shape, phase plan |
+| [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | Agent ownership, change control, prompt/data/incident policy, quality gates |
+| [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Signal map, log events, ledger, monitoring fields, debugging a request |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Render Blueprint/manual steps and post-deploy verification |
+| [agent_cards/](agent_cards/) | One card per agent: purpose, I/O, failure handling, safety constraints |
+| [runbooks/high-risk-vehicle.md](runbooks/high-risk-vehicle.md) | `CRITICAL_VEHICLE_RISK` response |
+| [runbooks/agent-failure.md](runbooks/agent-failure.md) | `AGENT_EXECUTION_FAILED` response |
+| [runbooks/llm-provider-failure.md](runbooks/llm-provider-failure.md) | `LLM_PROVIDER_FAILURE` response |
+
+---
+
+## Demo walkthrough
+
+The commands below are the exact local checks used to verify Phase 4. Start uvicorn on a
+free port (the examples use `8777`) and keep the terminal open.
+
+```powershell
+# 1. Generate a critical frame
+python -m simulator.vehicle_simulator --scenario critical --vehicle VH-003 --seed 42 > payload.json
+
+# 2. Ingest it with a correlation ID
+$headers = @{ "X-Correlation-ID" = "CORR-20261030-PHASE4DEMO" }
+$report = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8777/api/v1/vehicles/telemetry `
+  -ContentType "application/json" -InFile payload.json -Headers $headers
+
+# 3. Inspect the deterministic outcome
+$report.risk.level          # critical
+$report.risk.score          # 26
+$report.risk.hard_override  # True
+$report.agent_executions.Count  # 5
+
+# 4. Monitoring snapshot
+$m = Invoke-RestMethod http://127.0.0.1:8777/api/v1/monitoring
+$m.workflows_started; $m.workflows_completed; $m.incidents_total
+$m.agents | Format-Table agent_name, executions, successes, retries
+
+# 5. Incident + runbook
+$inc = Invoke-RestMethod http://127.0.0.1:8777/api/v1/incidents
+$inc | Format-Table code, severity, status, runbook_id, vehicle_id
+
+# 6. Fetch the full report
+Invoke-RestMethod "http://127.0.0.1:8777/api/v1/diagnostics/$($report.diagnostic_id)"
+```
+
+Observed locally on 2026-10-30 (seed 42, `mock` provider):
+
+```text
+risk: critical (26) | status: completed | agents: 5
+workflows started/completed/degraded/failed: 1/1/0/0
+agent executions: 5 | diagnostics: 1 | incidents total/active: 1/1 | provider: mock
+incident: CRITICAL_VEHICLE_RISK | critical | open | high_risk_vehicle | VH-003
+```
+
+The incident's `correlation_id` equals `CORR-20261030-PHASE4DEMO`, and the report shows
+`maintenance.repair_performed = false` — no repair is ever claimed.
+
+For the other scenarios (no restart required):
+
+| Scenario | Expected risk |
+| -------- | ------------- |
+| `normal` | `low` (0) |
+| `warning` | `medium` (5) |
+| `critical` | `critical` (26, hard override) |
+| `sensor_failure` | `high` (8) |
 
 ---
 
